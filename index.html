@@ -9,11 +9,11 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
 
-  <!-- ① Paste your Supabase credentials here -->
+  <!-- ① Supabase credentials (publishable key is safe to expose) -->
   <script>
     window.ZENTARYX_CONFIG = {
-      supabaseUrl:     'https://YOUR_PROJECT_ID.supabase.co',
-      supabaseAnonKey: 'YOUR_ANON_KEY_HERE',
+      supabaseUrl:     'https://fqaskrckcqxieqjqpzkf.supabase.co',
+      supabaseAnonKey: 'sb_publishable_722S83meM1iNBSv1m36-4g_YWOExTiS',
     };
   </script>
 
@@ -35,7 +35,6 @@
       <h1 class="login-title">Welcome to Zentaryx</h1>
       <p class="login-sub">Sign in to access your chats from any device</p>
       <button class="btn-google" id="googleSignIn">
-        <!-- Google "G" icon -->
         <svg width="18" height="18" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
           <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
           <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
@@ -136,7 +135,6 @@
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M4.93 4.93a10 10 0 0 0 0 14.14"/></svg>
           Settings
         </button>
-        <!-- User chip — populated by JS after login -->
         <div class="user-chip" id="userChip">
           <img class="user-avatar-img" id="userAvatarImg" src="" alt="" />
           <div class="user-info">
@@ -177,7 +175,6 @@
         <div class="messages" id="messages"></div>
       </div>
 
-      <!-- Input Area — JS moves this between #welcomeInputSlot and #main -->
       <div class="input-area" id="inputArea">
         <div class="input-pill">
           <button class="pill-btn-left" title="Attach (coming soon)" disabled>
