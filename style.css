@@ -498,3 +498,118 @@ html, body { height: 100%; background: var(--bg); color: var(--text); font-famil
   .pill-model-wrap { display: none; }
   .mode-tab span { display: none; }
 }
+
+/* ── Loading screen ──────────────────────────── */
+.loading-screen {
+  position: fixed; inset: 0;
+  background: var(--bg);
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  gap: 16px; z-index: 300;
+}
+
+.loading-logo {
+  width: 56px; height: 56px;
+  background: linear-gradient(135deg, var(--accent), #a78bfa);
+  border-radius: 16px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 24px; font-weight: 700; color: #fff;
+  animation: logoPulse 1.6s ease-in-out infinite;
+}
+
+.loading-text { font-size: 14px; color: var(--text-dim); }
+
+@keyframes logoPulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.7; transform: scale(0.95); }
+}
+
+/* ── Login screen ────────────────────────────── */
+.login-screen {
+  position: fixed; inset: 0;
+  background: var(--bg);
+  display: flex; align-items: center; justify-content: center;
+  padding: 24px; z-index: 200;
+}
+
+.login-card {
+  background: var(--surface);
+  border: 1.5px solid var(--border2);
+  border-radius: 24px;
+  padding: 44px 40px;
+  width: 100%; max-width: 400px;
+  display: flex; flex-direction: column; align-items: center;
+  gap: 12px;
+  box-shadow: 0 8px 40px rgba(100,70,200,0.15);
+  animation: fadeUp 0.4s ease;
+}
+
+.login-logo {
+  width: 60px; height: 60px;
+  background: linear-gradient(135deg, var(--accent), #a78bfa);
+  border-radius: 18px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 26px; font-weight: 700; color: #fff;
+  box-shadow: 0 0 32px var(--accent-glow);
+  margin-bottom: 4px;
+}
+
+.login-title { font-size: 22px; font-weight: 700; color: var(--text); text-align: center; }
+
+.login-sub { font-size: 14px; color: var(--text-muted); text-align: center; max-width: 280px; line-height: 1.5; margin-bottom: 8px; }
+
+.btn-google {
+  display: flex; align-items: center; justify-content: center; gap: 10px;
+  width: 100%; padding: 12px 20px;
+  border-radius: 99px; border: 1.5px solid var(--border2);
+  background: var(--surface); color: var(--text);
+  font-size: 14px; font-weight: 600; font-family: var(--font);
+  cursor: pointer; transition: background 0.15s, border-color 0.15s, transform 0.1s;
+  box-shadow: var(--shadow-sm);
+}
+.btn-google:hover { background: var(--surface2); border-color: var(--accent); transform: translateY(-1px); }
+.btn-google:active { transform: translateY(0); }
+
+.login-disclaimer { font-size: 11px; color: var(--text-dim); text-align: center; margin-top: 4px; }
+
+/* ── User chip (sidebar bottom) ─────────────── */
+.user-chip {
+  display: flex; align-items: center; gap: 8px;
+  padding: 6px 10px; border-radius: var(--radius-sm);
+  min-width: 0;
+}
+
+.user-avatar-img {
+  width: 28px; height: 28px; border-radius: 50%;
+  object-fit: cover; flex-shrink: 0;
+  border: 1.5px solid var(--border2);
+}
+
+.user-info {
+  flex: 1; min-width: 0;
+  display: flex; flex-direction: column; gap: 1px;
+}
+
+.user-name {
+  font-size: 12.5px; font-weight: 600; color: var(--text);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+
+.user-email {
+  font-size: 10.5px; color: var(--text-dim);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+
+.btn-logout {
+  width: 26px; height: 26px; border-radius: 6px; border: none;
+  background: transparent; color: var(--text-dim);
+  cursor: pointer; display: flex; align-items: center; justify-content: center;
+  flex-shrink: 0; transition: background 0.15s, color 0.15s;
+}
+.btn-logout:hover { background: rgba(220,38,38,0.10); color: var(--red); }
+
+/* ── Messages loading spinner ────────────────── */
+.msgs-loading {
+  display: flex; align-items: center; justify-content: center;
+  padding: 48px 0; flex: 1;
+}
