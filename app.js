@@ -791,55 +791,42 @@ function showLogin() {
 }
 
 async function tryLogin(user) {
-  try {
-    await onLogin(user);
-  } catch (err) {
-    console.error('onLogin failed:', err);
-    appInitialized = false;
-    showLogin();
-  }
+  try { await onLogin(user); }
+  catch (err) { console.error('onLogin failed:', err); appInitialized = false; showLogin(); }
 }
 
 async function init() {
   initEvents();
 
-  // Hard fallback: if nothing resolves within 6 s, show login screen
-  const safetyTimer = setTimeout(() => {
-    if (!appInitialized) showLogin();
-  }, 6000);
-  const done = () => clearTimeout(safetyTimer);
-
-  // onAuthStateChange fires INITIAL_SESSION (existing session) or SIGNED_IN (OAuth redirect)
-  db.auth.onAuthStateChange(async (event, session) => {
-    if ((event === 'SIGNED_IN' || event === 'INITIAL_SESSION') && session?.user && !appInitialized) {
+  // onAuthStateChange covers OAuth redirect (SIGNED_IN) and explicit sign-out.
+  // We do NOT rely on INITIAL_SESSION here — getSession() below is the boot path.
+  db.auth.onAuthStateChange((event, session) => {
+    if (event === 'SIGNED_IN' && session?.user && !appInitialized) {
       appInitialized = true;
-      done();
-      await tryLogin(session.user);
-    } else if (event === 'INITIAL_SESSION' && !session && !appInitialized) {
-      done();
-      showLogin();
+      tryLogin(session.user);
     } else if (event === 'SIGNED_OUT') {
       appInitialized = false;
       onSignOut();
     }
   });
 
-  // getSession() is a reliable fallback — reads localStorage immediately,
-  // no token-refresh network call, so it always returns fast
+  // getSession() can make a network call to refresh an expired token.
+  // Race it against a 5-second timeout so it can never hang the loading screen.
+  let bootSession = null;
   try {
-    const { data: { session } } = await db.auth.getSession();
-    if (session?.user && !appInitialized) {
+    bootSession = await Promise.race([
+      db.auth.getSession().then(r => r?.data?.session ?? null),
+      new Promise(resolve => setTimeout(() => resolve(null), 5000)),
+    ]);
+  } catch (_) { bootSession = null; }
+
+  if (!appInitialized) {
+    if (bootSession?.user) {
       appInitialized = true;
-      done();
-      await tryLogin(session.user);
-    } else if (!session && !appInitialized) {
-      done();
+      await tryLogin(bootSession.user);
+    } else {
       showLogin();
     }
-  } catch (err) {
-    console.error('Session check failed:', err);
-    done();
-    if (!appInitialized) showLogin();
   }
 }
 
