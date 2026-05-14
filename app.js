@@ -18,29 +18,26 @@ const MODEL_LABELS = {
 };
 
 const agentPersonas = {
-  assistant: { name: 'Zentaryx', systemSuffix: '' },
-  coder:     { name: 'Coder',    systemSuffix: ' You specialize in programming. Provide clean code with explanations.' },
-  analyst:   { name: 'Analyst',  systemSuffix: ' You specialize in data analysis and structured reasoning. Use bullet points and logical breakdowns.' },
+  chatbot:    { name: 'Zentaryx', systemSuffix: '' },
+  agent:      { name: 'Agent',    systemSuffix: ' You are an autonomous agent that breaks down tasks step by step and executes them methodically.' },
+  automation: { name: 'Auto',     systemSuffix: ' You specialize in automation, scripting, and workflow optimization. Provide precise, runnable solutions.' },
 };
 
 // ── State ──────────────────────────────────────
 const state = {
-  user: null,                // Supabase user object
+  user: null,
   apiKey: '',
   model: 'claude-sonnet-4-6',
   systemPrompt: DEFAULT_SYSTEM_PROMPT,
-  // { [uuid]: { id, title, agent, createdAt, messages: [], messagesLoaded: bool } }
   chats: {},
   activeChatId: null,
-  agent: 'assistant',
-  mode: 'chatbot',
+  agent: 'chatbot',
   isLoading: false,
 };
 
 // ── Settings — localStorage, namespaced per user ──
-function settingsKey() {
-  return `ztx_settings_${state.user?.id || 'anon'}`;
-}
+function settingsKey() { return `ztx_settings_${state.user?.id || 'anon'}`; }
+function pinnedKey()   { return `ztx_pinned_${state.user?.id || 'anon'}`; }
 
 function saveSettings() {
   localStorage.setItem(settingsKey(), JSON.stringify({
@@ -57,6 +54,21 @@ function loadSettings() {
     state.model        = s.model        || 'claude-sonnet-4-6';
     state.systemPrompt = s.systemPrompt || DEFAULT_SYSTEM_PROMPT;
   } catch (_) {}
+}
+
+function getPinnedIds() {
+  try { return JSON.parse(localStorage.getItem(pinnedKey()) || '[]'); } catch (_) { return []; }
+}
+
+function setPinnedIds(ids) {
+  localStorage.setItem(pinnedKey(), JSON.stringify(ids));
+}
+
+function togglePin(chatId) {
+  const ids = getPinnedIds();
+  const idx = ids.indexOf(chatId);
+  if (idx === -1) ids.push(chatId); else ids.splice(idx, 1);
+  setPinnedIds(ids);
 }
 
 // ── Supabase DB helpers ────────────────────────
@@ -150,31 +162,32 @@ const els = {
   app:           $('app'),
   googleSignIn:  $('googleSignIn'),
   // sidebar
-  sidebar:         $('sidebar'),
-  sidebarToggle:   $('sidebarToggle'),
-  mobileSidebarBtn:$('mobileSidebarBtn'),
-  newChatBtn:      $('newChatBtn'),
-  historyList:     $('historyList'),
-  openSettings:    $('openSettings'),
+  sidebar:          $('sidebar'),
+  sidebarToggle:    $('sidebarToggle'),
+  mobileSidebarBtn: $('mobileSidebarBtn'),
+  newChatBtn:       $('newChatBtn'),
+  projectsBtn:      $('projectsBtn'),
+  moreBtn:          $('moreBtn'),
+  historyList:      $('historyList'),
   // user chip
   userAvatarImg:    $('userAvatarImg'),
   userName:         $('userName'),
   userEmailDisplay: $('userEmailDisplay'),
   logoutBtn:        $('logoutBtn'),
   // main
-  main:         $('main'),
-  chatArea:     $('chatArea'),
-  welcomeScreen:$('welcomeScreen'),
+  main:            $('main'),
+  chatArea:        $('chatArea'),
+  welcomeScreen:   $('welcomeScreen'),
   welcomeInputSlot:$('welcomeInputSlot'),
-  messages:     $('messages'),
-  inputArea:    $('inputArea'),
-  chatInput:    $('chatInput'),
-  sendBtn:      $('sendBtn'),
-  clearChatBtn: $('clearChatBtn'),
-  pillModelSelect:$('pillModelSelect'),
-  connDot:      $('connDot'),
-  connLabel:    $('connLabel'),
-  topSettingsBtn:$('topSettingsBtn'),
+  messages:        $('messages'),
+  inputArea:       $('inputArea'),
+  chatInput:       $('chatInput'),
+  sendBtn:         $('sendBtn'),
+  clearChatBtn:    $('clearChatBtn'),
+  pillModelSelect: $('pillModelSelect'),
+  connDot:         $('connDot'),
+  connLabel:       $('connLabel'),
+  topSettingsBtn:  $('topSettingsBtn'),
   // settings modal
   settingsModal:  $('settingsModal'),
   closeSettings:  $('closeSettings'),
@@ -184,6 +197,12 @@ const els = {
   modelSelect:    $('modelSelect'),
   systemPrompt:   $('systemPrompt'),
   toggleKey:      $('toggleKey'),
+  // context menu
+  ctxMenu:      $('ctxMenu'),
+  ctxPin:       $('ctxPin'),
+  ctxPinLabel:  $('ctxPinLabel'),
+  ctxRename:    $('ctxRename'),
+  ctxDelete:    $('ctxDelete'),
 };
 
 // ── Toast ──────────────────────────────────────
@@ -235,7 +254,6 @@ function getActiveChat() {
   return state.activeChatId ? state.chats[state.activeChatId] : null;
 }
 
-// Move input pill between welcome slot and bottom of main
 function updateLayout() {
   const chat = getActiveChat();
   const hasMessages = !!(chat && chat.messages.length > 0);
@@ -256,30 +274,90 @@ function scrollToBottom() { els.chatArea.scrollTop = els.chatArea.scrollHeight; 
 function resizeInput() {
   const el = els.chatInput;
   el.style.height = 'auto';
-  el.style.height = Math.min(el.scrollHeight, 150) + 'px';
+  // 3 lines max: ~21px per line × 3 + top/bottom padding ≈ 73px
+  el.style.height = Math.min(el.scrollHeight, 73) + 'px';
 }
 
 // ── History ────────────────────────────────────
 function renderHistory() {
-  const ids = Object.keys(state.chats).sort((a,b) => state.chats[b].createdAt - state.chats[a].createdAt);
-  if (!ids.length) { els.historyList.innerHTML = '<div class="history-empty">No chats yet.</div>'; return; }
+  const pinned = getPinnedIds();
+  const pinnedSet = new Set(pinned);
 
-  els.historyList.innerHTML = ids.map(id => {
+  const all = Object.keys(state.chats);
+  if (!all.length) { els.historyList.innerHTML = '<div class="history-empty">No chats yet.</div>'; return; }
+
+  // Pinned first, then rest sorted by createdAt desc
+  const sorted = [
+    ...pinned.filter(id => state.chats[id]),
+    ...all.filter(id => !pinnedSet.has(id)).sort((a,b) => state.chats[b].createdAt - state.chats[a].createdAt),
+  ];
+
+  const pinSvg = `<svg class="pin-icon" width="11" height="11" viewBox="0 0 24 24" fill="currentColor" stroke="none"><path d="M16 4v6l2 2-6 6-2-6H4l2-2 6-2V4h4z"/></svg>`;
+
+  els.historyList.innerHTML = sorted.map(id => {
     const c = state.chats[id];
-    return `<div class="history-item ${id===state.activeChatId?'active':''}" data-id="${id}">
+    const isPinned = pinnedSet.has(id);
+    return `<div class="history-item ${id===state.activeChatId?'active':''} ${isPinned?'pinned':''}" data-id="${id}">
+      ${isPinned ? pinSvg : ''}
       <span class="history-item-text">${escHtml(c.title)}</span>
       <span class="history-item-time">${formatTime(c.createdAt)}</span>
-      <button class="history-item-del" data-del="${id}" title="Delete">
-        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
-      </button>
     </div>`;
   }).join('');
+}
+
+// ── Context menu ───────────────────────────────
+let ctxTargetId = null;
+
+function showCtxMenu(e, chatId) {
+  e.preventDefault();
+  ctxTargetId = chatId;
+  const pinned = getPinnedIds();
+  els.ctxPinLabel.textContent = pinned.includes(chatId) ? 'Unpin' : 'Pin';
+  els.ctxMenu.style.left = e.clientX + 'px';
+  els.ctxMenu.style.top  = e.clientY + 'px';
+  els.ctxMenu.classList.add('open');
+}
+
+function hideCtxMenu() {
+  els.ctxMenu.classList.remove('open');
+  ctxTargetId = null;
+}
+
+// ── Rename ─────────────────────────────────────
+function startRename(chatId) {
+  const item = els.historyList.querySelector(`[data-id="${chatId}"]`);
+  if (!item) return;
+  const textSpan = item.querySelector('.history-item-text');
+  if (!textSpan) return;
+
+  const chat = state.chats[chatId];
+  const input = document.createElement('input');
+  input.className = 'rename-input';
+  input.value = chat.title;
+
+  textSpan.replaceWith(input);
+  input.focus();
+  input.select();
+
+  async function commitRename() {
+    const newTitle = input.value.trim() || chat.title;
+    chat.title = newTitle;
+    await dbUpdateChatTitle(chatId, newTitle);
+    renderHistory();
+  }
+
+  input.addEventListener('keydown', e => {
+    if (e.key === 'Enter') { e.preventDefault(); input.blur(); }
+    if (e.key === 'Escape') { input.value = chat.title; input.blur(); }
+  });
+  input.addEventListener('blur', commitRename, { once: true });
 }
 
 // ── Messages ───────────────────────────────────
 function buildMessageHTML(msg) {
   const isUser = msg.role === 'user';
-  const label  = isUser ? 'You' : agentPersonas[msg.agent || 'assistant'].name;
+  const agentKey = (msg.agent && agentPersonas[msg.agent]) ? msg.agent : 'chatbot';
+  const label  = isUser ? 'You' : agentPersonas[agentKey].name;
   const content= isUser ? `<p>${escHtml(msg.content)}</p>` : renderMarkdown(msg.content);
   return `<div class="message ${msg.role}" data-id="${msg.id}">
     <div class="msg-avatar">${isUser?'U':'Z'}</div>
@@ -310,11 +388,12 @@ function appendMessage(msg) {
 }
 
 function appendThinking() {
+  const agentKey = agentPersonas[state.agent] ? state.agent : 'chatbot';
   const div = document.createElement('div');
   div.className = 'message assistant'; div.id = 'thinking-msg';
   div.innerHTML = `<div class="msg-avatar">Z</div>
     <div class="msg-body">
-      <div class="msg-name">${agentPersonas[state.agent].name}</div>
+      <div class="msg-name">${agentPersonas[agentKey].name}</div>
       <div class="msg-content"><div class="thinking"><span></span><span></span><span></span></div></div>
     </div>`;
   els.messages.appendChild(div);
@@ -333,7 +412,6 @@ async function switchChat(id) {
   if (!chat) return;
 
   if (!chat.messagesLoaded) {
-    // Show loading dots while fetching messages
     els.welcomeScreen.style.display = 'none';
     els.messages.innerHTML = '<div class="msgs-loading"><div class="thinking"><span></span><span></span><span></span></div></div>';
     els.messages.style.display = 'flex';
@@ -348,6 +426,10 @@ async function switchChat(id) {
 
 async function deleteChat(id) {
   try { await dbDeleteChat(id); } catch (err) { toast('Delete failed: ' + err.message, 'error'); return; }
+
+  // Remove from pinned if present
+  const pinned = getPinnedIds().filter(p => p !== id);
+  setPinnedIds(pinned);
 
   delete state.chats[id];
   if (state.activeChatId === id) {
@@ -377,7 +459,6 @@ async function sendMessage() {
   if (!text || state.isLoading) return;
   if (!state.apiKey) { openSettings(); toast('Add your Anthropic API key first.', 'error'); return; }
 
-  // Create a new chat in DB if none active
   if (!state.activeChatId) {
     try {
       state.activeChatId = await dbCreateChat(state.agent);
@@ -387,7 +468,6 @@ async function sendMessage() {
 
   const chat = getActiveChat();
 
-  // Clear input early for snappy UX
   els.chatInput.value = '';
   els.chatInput.style.height = 'auto';
 
@@ -395,11 +475,9 @@ async function sendMessage() {
   setLoading(true);
 
   try {
-    // Save user message to DB first so it has a real UUID
     const userMsgId = await dbSaveMessage(state.activeChatId, 'user', text, state.agent);
     const userMsg = { id: userMsgId, role: 'user', content: text, agent: state.agent };
 
-    // Auto-title on first message
     if (chat.messages.length === 0) {
       const title = text.slice(0, 46) + (text.length > 46 ? '…' : '');
       await dbUpdateChatTitle(state.activeChatId, title);
@@ -408,11 +486,10 @@ async function sendMessage() {
     }
 
     chat.messages.push(userMsg);
-    updateLayout();      // move input pill to bottom, show messages area
+    updateLayout();
     appendMessage(userMsg);
     appendThinking();
 
-    // Call Claude
     const reply = await callClaude(chat.messages);
     removeThinking();
 
@@ -424,7 +501,6 @@ async function sendMessage() {
 
   } catch (err) {
     removeThinking();
-    // Don't persist error messages to DB — just show in UI
     const errMsg = {
       id: `err_${Date.now()}`, role: 'assistant', agent: state.agent,
       content: `**Error:** ${err.message || 'Something went wrong. Check your API key.'}`,
@@ -441,10 +517,11 @@ async function sendMessage() {
 
 // ── Anthropic API ──────────────────────────────
 async function callClaude(messages) {
-  const persona = agentPersonas[state.agent];
+  const agentKey = agentPersonas[state.agent] ? state.agent : 'chatbot';
+  const persona = agentPersonas[agentKey];
   const systemText = state.systemPrompt + (persona.systemSuffix || '');
   const apiMessages = messages
-    .filter(m => !m.id?.startsWith('err_'))   // skip in-memory error msgs
+    .filter(m => !m.id?.startsWith('err_'))
     .map(m => ({ role: m.role, content: m.content }));
 
   const res = await fetch('https://api.anthropic.com/v1/messages', {
@@ -493,7 +570,7 @@ function saveSettingsAction() {
 
 function updateConnectionBadge() {
   const connected = !!state.apiKey;
-  els.connDot.className   = 'conn-dot' + (connected ? ' active' : '');
+  els.connDot.className    = 'conn-dot' + (connected ? ' active' : '');
   els.connLabel.textContent = connected
     ? `Connected: ${MODEL_LABELS[state.model] || state.model}`
     : 'Not connected';
@@ -514,9 +591,7 @@ async function signInWithGoogle() {
   }
 }
 
-async function signOut() {
-  await db.auth.signOut();
-}
+async function signOut() { await db.auth.signOut(); }
 
 function updateUserDisplay(user) {
   const meta = user.user_metadata || {};
@@ -524,7 +599,7 @@ function updateUserDisplay(user) {
   const email = user.email || '';
   const avatar= meta.avatar_url || meta.picture || '';
 
-  els.userName.textContent        = name;
+  els.userName.textContent         = name;
   els.userEmailDisplay.textContent = email;
 
   if (avatar) {
@@ -540,22 +615,18 @@ async function onLogin(user) {
   loadSettings();
   updateUserDisplay(user);
 
-  // Load chats from DB
   try { await dbLoadChats(); } catch (err) { toast('Failed to load chats: ' + err.message, 'error'); }
 
-  // Auto-select most recent chat
   const ids = Object.keys(state.chats);
   if (ids.length) {
-    state.activeChatId = ids[0]; // already sorted desc by created_at
+    state.activeChatId = ids[0];
     try { await dbLoadMessages(state.activeChatId); } catch (_) {}
   }
 
-  // Show app
   els.loadingScreen.style.display = 'none';
   els.loginScreen.style.display   = 'none';
   els.app.style.display           = 'flex';
 
-  // Sync UI state
   els.pillModelSelect.value = state.model;
   els.apiKeyInput.value     = state.apiKey;
   els.modelSelect.value     = state.model;
@@ -577,7 +648,7 @@ function onSignOut() {
 
 // ── Sidebar ────────────────────────────────────
 let sidebarCollapsed = false;
-function toggleSidebar() { sidebarCollapsed = !sidebarCollapsed; els.sidebar.classList.toggle('collapsed', sidebarCollapsed); }
+function toggleSidebar()       { sidebarCollapsed = !sidebarCollapsed; els.sidebar.classList.toggle('collapsed', sidebarCollapsed); }
 function toggleMobileSidebar() { els.sidebar.classList.toggle('mobile-open'); }
 
 // ── Events ─────────────────────────────────────
@@ -597,26 +668,57 @@ function initEvents() {
     updateLayout();
   });
 
+  els.projectsBtn.addEventListener('click', () => toast('Projects — coming soon', ''));
+  els.moreBtn.addEventListener('click',     () => toast('More — coming soon', ''));
+
+  // History clicks
   els.historyList.addEventListener('click', e => {
-    const del = e.target.closest('[data-del]');
-    if (del) { e.stopPropagation(); deleteChat(del.dataset.del); return; }
+    if (e.target.closest('.rename-input')) return;
     const item = e.target.closest('[data-id]');
     if (item) switchChat(item.dataset.id);
   });
 
+  // Right-click context menu on history items
+  els.historyList.addEventListener('contextmenu', e => {
+    const item = e.target.closest('[data-id]');
+    if (!item) return;
+    showCtxMenu(e, item.dataset.id);
+  });
+
+  // Context menu actions
+  els.ctxPin.addEventListener('click', () => {
+    if (!ctxTargetId) return;
+    togglePin(ctxTargetId);
+    renderHistory();
+    hideCtxMenu();
+  });
+
+  els.ctxRename.addEventListener('click', () => {
+    const id = ctxTargetId;
+    hideCtxMenu();
+    if (id) startRename(id);
+  });
+
+  els.ctxDelete.addEventListener('click', () => {
+    const id = ctxTargetId;
+    hideCtxMenu();
+    if (id) deleteChat(id);
+  });
+
+  // Hide context menu on outside click or Escape
+  document.addEventListener('click', e => {
+    if (!els.ctxMenu.contains(e.target)) hideCtxMenu();
+  });
+  document.addEventListener('keydown', e => {
+    if (e.key === 'Escape') hideCtxMenu();
+  });
+
+  // Agent tabs
   document.querySelectorAll('.agent-tab').forEach(tab => {
     tab.addEventListener('click', () => {
       document.querySelectorAll('.agent-tab').forEach(t => t.classList.remove('active'));
       tab.classList.add('active');
       state.agent = tab.dataset.agent;
-    });
-  });
-
-  document.querySelectorAll('.mode-tab').forEach(tab => {
-    tab.addEventListener('click', () => {
-      document.querySelectorAll('.mode-tab').forEach(t => t.classList.remove('active'));
-      tab.classList.add('active');
-      state.mode = tab.dataset.mode;
     });
   });
 
@@ -644,7 +746,7 @@ function initEvents() {
     } catch (err) { toast('Failed to clear: ' + err.message, 'error'); }
   });
 
-  // Pill model selector → keep in sync with settings
+  // Pill model selector
   els.pillModelSelect.addEventListener('change', () => {
     state.model = els.pillModelSelect.value;
     els.modelSelect.value = state.model;
@@ -664,7 +766,6 @@ function initEvents() {
   });
 
   // Settings modal
-  els.openSettings.addEventListener('click', openSettings);
   els.topSettingsBtn.addEventListener('click', openSettings);
   els.closeSettings.addEventListener('click', closeSettingsModal);
   els.cancelSettings.addEventListener('click', closeSettingsModal);
@@ -684,7 +785,6 @@ let appInitialized = false;
 async function init() {
   initEvents();
 
-  // Listen for future sign-in / sign-out events (including OAuth redirect return)
   db.auth.onAuthStateChange(async (event, session) => {
     if (event === 'SIGNED_IN' && session?.user && !appInitialized) {
       appInitialized = true;
@@ -695,7 +795,6 @@ async function init() {
     }
   });
 
-  // Check existing session on page load
   const { data: { session } } = await db.auth.getSession();
   if (session?.user && !appInitialized) {
     appInitialized = true;

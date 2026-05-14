@@ -81,18 +81,7 @@ html, body { height: 100%; background: var(--bg); color: var(--text); font-famil
 }
 .icon-btn:hover { background: var(--surface2); color: var(--text); }
 
-.new-chat-btn {
-  margin: 11px 10px 8px;
-  padding: 8px 13px;
-  border-radius: var(--radius-sm);
-  border: 1px solid var(--border2);
-  background: var(--surface2);
-  color: var(--text); font-size: 13px; font-weight: 500;
-  cursor: pointer; display: flex; align-items: center; gap: 7px;
-  transition: background 0.15s, border-color 0.15s; white-space: nowrap;
-}
-.new-chat-btn:hover { background: var(--surface3); border-color: var(--accent); }
-.new-chat-btn svg { color: var(--accent); flex-shrink: 0; }
+/* .new-chat-btn removed — replaced by .nav-btn */
 
 .agent-tabs { display: flex; gap: 3px; padding: 0 10px 9px; }
 
@@ -106,6 +95,24 @@ html, body { height: 100%; background: var(--bg); color: var(--text); font-famil
 }
 .agent-tab:hover { background: var(--surface2); color: var(--text); }
 .agent-tab.active { background: var(--accent-dim); color: var(--accent); }
+
+/* ── Sidebar nav ─────────────────────────────── */
+.sidebar-nav {
+  padding: 2px 10px 8px;
+  display: flex; flex-direction: column; gap: 1px;
+  border-bottom: 1px solid var(--border);
+}
+
+.nav-btn {
+  padding: 8px 10px; border-radius: var(--radius-sm); border: none;
+  background: transparent; color: var(--text-muted);
+  font-size: 13px; font-weight: 500; font-family: var(--font);
+  cursor: pointer; display: flex; align-items: center; gap: 8px;
+  transition: background 0.15s, color 0.15s; text-align: left; width: 100%;
+}
+.nav-btn:hover { background: var(--surface2); color: var(--text); }
+.nav-btn.nav-active { color: var(--accent); }
+.nav-btn svg { flex-shrink: 0; }
 
 .history-section { flex: 1; overflow-y: auto; padding: 0 6px; display: flex; flex-direction: column; }
 
@@ -484,6 +491,45 @@ html, body { height: 100%; background: var(--bg); color: var(--text); font-famil
   0%, 80%, 100% { transform: scale(0.6); opacity: 0.4; }
   40% { transform: scale(1); opacity: 1; }
 }
+
+/* ── Pinned chat indicator ───────────────────── */
+.history-item.pinned .history-item-text { color: var(--accent); }
+.pin-icon { color: var(--accent); flex-shrink: 0; }
+
+/* ── Inline rename input ─────────────────────── */
+.rename-input {
+  width: 100%; background: var(--surface);
+  border: 1.5px solid var(--accent); border-radius: 4px;
+  color: var(--text); font-size: 13px; font-family: var(--font);
+  padding: 1px 6px; outline: none;
+}
+
+/* ── Context menu ────────────────────────────── */
+.ctx-menu {
+  position: fixed; z-index: 600;
+  background: var(--surface); border: 1.5px solid var(--border2);
+  border-radius: var(--radius-sm); box-shadow: var(--shadow);
+  padding: 4px; min-width: 148px;
+  display: none; flex-direction: column;
+}
+.ctx-menu.open { display: flex; animation: fadeUp 0.12s ease; }
+
+.ctx-item {
+  display: flex; align-items: center; gap: 8px;
+  padding: 7px 10px; border-radius: 6px; border: none;
+  background: transparent; color: var(--text);
+  font-size: 13px; font-family: var(--font);
+  cursor: pointer; width: 100%; text-align: left;
+  transition: background 0.12s;
+}
+.ctx-item:hover { background: var(--surface2); }
+.ctx-danger { color: var(--red); }
+.ctx-danger:hover { background: rgba(220,38,38,0.08); }
+
+.ctx-divider { height: 1px; background: var(--border); margin: 3px 0; }
+
+/* ── Mode tabs (hidden, kept for CSS target) ─── */
+.mode-tabs { display: none; }
 
 /* ── Responsive ──────────────────────────────── */
 @media (max-width: 640px) {
