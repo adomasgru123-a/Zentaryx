@@ -782,26 +782,40 @@ function initEvents() {
 // ── Boot ───────────────────────────────────────
 let appInitialized = false;
 
+function showLogin() {
+  els.loadingScreen.style.display = 'none';
+  els.loginScreen.style.display   = 'flex';
+}
+
 async function init() {
   initEvents();
 
+  // INITIAL_SESSION fires immediately with current session on every page load.
+  // SIGNED_IN fires after OAuth redirect. Both paths must call onLogin.
   db.auth.onAuthStateChange(async (event, session) => {
-    if (event === 'SIGNED_IN' && session?.user && !appInitialized) {
+    if ((event === 'SIGNED_IN' || event === 'INITIAL_SESSION') && session?.user && !appInitialized) {
       appInitialized = true;
       await onLogin(session.user);
+    } else if (event === 'INITIAL_SESSION' && !session && !appInitialized) {
+      showLogin();
     } else if (event === 'SIGNED_OUT') {
       appInitialized = false;
       onSignOut();
     }
   });
 
-  const { data: { session } } = await db.auth.getSession();
-  if (session?.user && !appInitialized) {
-    appInitialized = true;
-    await onLogin(session.user);
-  } else if (!session) {
-    els.loadingScreen.style.display = 'none';
-    els.loginScreen.style.display   = 'flex';
+  // Fallback: getSession() catches cases where onAuthStateChange doesn't fire
+  try {
+    const { data: { session } } = await db.auth.getSession();
+    if (session?.user && !appInitialized) {
+      appInitialized = true;
+      await onLogin(session.user);
+    } else if (!session && !appInitialized) {
+      showLogin();
+    }
+  } catch (err) {
+    console.error('Session check failed:', err);
+    if (!appInitialized) showLogin();
   }
 }
 
