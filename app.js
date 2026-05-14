@@ -615,26 +615,29 @@ async function onLogin(user) {
   loadSettings();
   updateUserDisplay(user);
 
-  try { await dbLoadChats(); } catch (err) { toast('Failed to load chats: ' + err.message, 'error'); }
+  try {
+    try { await dbLoadChats(); } catch (err) { toast('Failed to load chats: ' + err.message, 'error'); }
 
-  const ids = Object.keys(state.chats);
-  if (ids.length) {
-    state.activeChatId = ids[0];
-    try { await dbLoadMessages(state.activeChatId); } catch (_) {}
+    const ids = Object.keys(state.chats);
+    if (ids.length) {
+      state.activeChatId = ids[0];
+      try { await dbLoadMessages(state.activeChatId); } catch (_) {}
+    }
+  } finally {
+    // Always show the app — even if DB calls fail, never leave loading screen stuck
+    els.loadingScreen.style.display = 'none';
+    els.loginScreen.style.display   = 'none';
+    els.app.style.display           = 'flex';
+
+    els.pillModelSelect.value = state.model;
+    els.apiKeyInput.value     = state.apiKey;
+    els.modelSelect.value     = state.model;
+    els.systemPrompt.value    = state.systemPrompt;
+    updateConnectionBadge();
+    renderHistory();
+    renderMessages();
+    updateLayout();
   }
-
-  els.loadingScreen.style.display = 'none';
-  els.loginScreen.style.display   = 'none';
-  els.app.style.display           = 'flex';
-
-  els.pillModelSelect.value = state.model;
-  els.apiKeyInput.value     = state.apiKey;
-  els.modelSelect.value     = state.model;
-  els.systemPrompt.value    = state.systemPrompt;
-  updateConnectionBadge();
-  renderHistory();
-  renderMessages();
-  updateLayout();
 }
 
 function onSignOut() {
@@ -787,16 +790,33 @@ function showLogin() {
   els.loginScreen.style.display   = 'flex';
 }
 
+async function tryLogin(user) {
+  try {
+    await onLogin(user);
+  } catch (err) {
+    console.error('onLogin failed:', err);
+    appInitialized = false;
+    showLogin();
+  }
+}
+
 async function init() {
   initEvents();
 
-  // INITIAL_SESSION fires immediately with current session on every page load.
-  // SIGNED_IN fires after OAuth redirect. Both paths must call onLogin.
+  // Hard fallback: if nothing resolves within 6 s, show login screen
+  const safetyTimer = setTimeout(() => {
+    if (!appInitialized) showLogin();
+  }, 6000);
+  const done = () => clearTimeout(safetyTimer);
+
+  // onAuthStateChange fires INITIAL_SESSION (existing session) or SIGNED_IN (OAuth redirect)
   db.auth.onAuthStateChange(async (event, session) => {
     if ((event === 'SIGNED_IN' || event === 'INITIAL_SESSION') && session?.user && !appInitialized) {
       appInitialized = true;
-      await onLogin(session.user);
+      done();
+      await tryLogin(session.user);
     } else if (event === 'INITIAL_SESSION' && !session && !appInitialized) {
+      done();
       showLogin();
     } else if (event === 'SIGNED_OUT') {
       appInitialized = false;
@@ -804,17 +824,21 @@ async function init() {
     }
   });
 
-  // Fallback: getSession() catches cases where onAuthStateChange doesn't fire
+  // getSession() is a reliable fallback — reads localStorage immediately,
+  // no token-refresh network call, so it always returns fast
   try {
     const { data: { session } } = await db.auth.getSession();
     if (session?.user && !appInitialized) {
       appInitialized = true;
-      await onLogin(session.user);
+      done();
+      await tryLogin(session.user);
     } else if (!session && !appInitialized) {
+      done();
       showLogin();
     }
   } catch (err) {
     console.error('Session check failed:', err);
+    done();
     if (!appInitialized) showLogin();
   }
 }
