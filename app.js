@@ -19,9 +19,22 @@ const MODEL_LABELS = {
 
 const agentPersonas = {
   chatbot:    { name: 'Zentaryx', systemSuffix: '' },
-  agent:      { name: 'Agent',    systemSuffix: ' You are an autonomous agent that breaks down tasks step by step and executes them methodically.' },
-  automation: { name: 'Auto',     systemSuffix: ' You specialize in automation, scripting, and workflow optimization. Provide precise, runnable solutions.' },
+  agent:      { name: 'Agent',    systemSuffix: ' You are an autonomous agent. Break tasks into steps and execute them methodically.' },
+  automation: { name: 'Auto',     systemSuffix: ' You specialize in automation, scripting, and workflow optimization.' },
 };
+
+const AGENT_NAV = [
+  { id: 'general',         label: 'General' },
+  { id: 'apps',            label: 'Apps' },
+  { id: 'apis',            label: 'APIs' },
+  { id: 'files',           label: 'Files' },
+  { id: 'skills',          label: 'Skills' },
+  { id: 'roles',           label: 'Roles' },
+  { id: 'agent',           label: 'Agent' },
+  { id: 'settings',        label: 'Settings' },
+  { id: 'config',          label: 'Config' },
+  { id: 'personalization', label: 'Personalization' },
+];
 
 // ── State ──────────────────────────────────────
 const state = {
@@ -35,9 +48,15 @@ const state = {
   isLoading: false,
 };
 
+// View state (not persisted)
+let currentView = 'chat';
+let selectedAgentId = null;
+let selectedAgentSection = 'general';
+
 // ── Settings — localStorage, namespaced per user ──
 function settingsKey() { return `ztx_settings_${state.user?.id || 'anon'}`; }
 function pinnedKey()   { return `ztx_pinned_${state.user?.id || 'anon'}`; }
+function agentsKey()   { return `ztx_agents_${state.user?.id || 'anon'}`; }
 
 function saveSettings() {
   localStorage.setItem(settingsKey(), JSON.stringify({
@@ -59,16 +78,34 @@ function loadSettings() {
 function getPinnedIds() {
   try { return JSON.parse(localStorage.getItem(pinnedKey()) || '[]'); } catch (_) { return []; }
 }
-
-function setPinnedIds(ids) {
-  localStorage.setItem(pinnedKey(), JSON.stringify(ids));
-}
+function setPinnedIds(ids) { localStorage.setItem(pinnedKey(), JSON.stringify(ids)); }
 
 function togglePin(chatId) {
   const ids = getPinnedIds();
   const idx = ids.indexOf(chatId);
   if (idx === -1) ids.push(chatId); else ids.splice(idx, 1);
   setPinnedIds(ids);
+}
+
+function loadAgents() {
+  try { return JSON.parse(localStorage.getItem(agentsKey()) || '[]'); } catch (_) { return []; }
+}
+function saveAgents(agents) { localStorage.setItem(agentsKey(), JSON.stringify(agents)); }
+
+function createNewAgent(data) {
+  const agents = loadAgents();
+  const agent = {
+    id: (crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}_${Math.random().toString(36).slice(2)}`),
+    title: data.title,
+    username: data.username,
+    description: data.description,
+    api: data.api,
+    type: data.type,
+    createdAt: Date.now(),
+  };
+  agents.unshift(agent);
+  saveAgents(agents);
+  return agent;
 }
 
 // ── Supabase DB helpers ────────────────────────
@@ -78,9 +115,7 @@ async function dbLoadChats() {
     .select('id, title, agent, created_at')
     .eq('user_id', state.user.id)
     .order('created_at', { ascending: false });
-
   if (error) throw error;
-
   state.chats = {};
   for (const row of data || []) {
     state.chats[row.id] = {
@@ -93,31 +128,21 @@ async function dbLoadChats() {
 
 async function dbLoadMessages(chatId) {
   const { data, error } = await db
-    .from('messages')
-    .select('id, role, content, agent')
-    .eq('chat_id', chatId)
-    .order('created_at', { ascending: true });
-
+    .from('messages').select('id, role, content, agent')
+    .eq('chat_id', chatId).order('created_at', { ascending: true });
   if (error) throw error;
-
   const chat = state.chats[chatId];
   if (chat) {
-    chat.messages = (data || []).map(r => ({
-      id: r.id, role: r.role, content: r.content, agent: r.agent,
-    }));
+    chat.messages = (data || []).map(r => ({ id: r.id, role: r.role, content: r.content, agent: r.agent }));
     chat.messagesLoaded = true;
   }
 }
 
 async function dbCreateChat(agent) {
   const { data, error } = await db
-    .from('chats')
-    .insert({ user_id: state.user.id, title: 'New Chat', agent })
-    .select()
-    .single();
-
+    .from('chats').insert({ user_id: state.user.id, title: 'New Chat', agent })
+    .select().single();
   if (error) throw error;
-
   state.chats[data.id] = {
     id: data.id, title: data.title, agent: data.agent,
     createdAt: new Date(data.created_at).getTime(),
@@ -133,11 +158,8 @@ async function dbUpdateChatTitle(chatId, title) {
 
 async function dbSaveMessage(chatId, role, content, agent) {
   const { data, error } = await db
-    .from('messages')
-    .insert({ chat_id: chatId, role, content, agent })
-    .select('id')
-    .single();
-
+    .from('messages').insert({ chat_id: chatId, role, content, agent })
+    .select('id').single();
   if (error) throw error;
   return data.id;
 }
@@ -174,7 +196,7 @@ const els = {
   userName:         $('userName'),
   userEmailDisplay: $('userEmailDisplay'),
   logoutBtn:        $('logoutBtn'),
-  // main
+  // main / chat
   main:            $('main'),
   chatArea:        $('chatArea'),
   welcomeScreen:   $('welcomeScreen'),
@@ -183,11 +205,33 @@ const els = {
   inputArea:       $('inputArea'),
   chatInput:       $('chatInput'),
   sendBtn:         $('sendBtn'),
-  clearChatBtn:    $('clearChatBtn'),
-  pillModelSelect: $('pillModelSelect'),
-  connDot:         $('connDot'),
-  connLabel:       $('connLabel'),
-  topSettingsBtn:  $('topSettingsBtn'),
+  // topbar
+  chatTopbarActions:   $('chatTopbarActions'),
+  agentsTopbarActions: $('agentsTopbarActions'),
+  clearChatBtn:        $('clearChatBtn'),
+  pillModelSelect:     $('pillModelSelect'),
+  connDot:             $('connDot'),
+  connLabel:           $('connLabel'),
+  topSettingsBtn:      $('topSettingsBtn'),
+  // agents view
+  agentsView:          $('agentsView'),
+  agentsListScreen:    $('agentsListScreen'),
+  agentsEmpty:         $('agentsEmpty'),
+  agentsGrid:          $('agentsGrid'),
+  agentDetail:         $('agentDetail'),
+  agentDetailNav:      $('agentDetailNav'),
+  agentDetailContent:  $('agentDetailContent'),
+  addAgentBtn:         $('addAgentBtn'),
+  // add-agent modal
+  addAgentModal:       $('addAgentModal'),
+  closeAddAgent:       $('closeAddAgent'),
+  cancelAddAgent:      $('cancelAddAgent'),
+  createAgentBtn:      $('createAgentBtn'),
+  newAgentTitle:       $('newAgentTitle'),
+  newAgentUsername:    $('newAgentUsername'),
+  newAgentDescription: $('newAgentDescription'),
+  newAgentApi:         $('newAgentApi'),
+  newAgentType:        $('newAgentType'),
   // settings modal
   settingsModal:  $('settingsModal'),
   closeSettings:  $('closeSettings'),
@@ -198,11 +242,11 @@ const els = {
   systemPrompt:   $('systemPrompt'),
   toggleKey:      $('toggleKey'),
   // context menu
-  ctxMenu:      $('ctxMenu'),
-  ctxPin:       $('ctxPin'),
-  ctxPinLabel:  $('ctxPinLabel'),
-  ctxRename:    $('ctxRename'),
-  ctxDelete:    $('ctxDelete'),
+  ctxMenu:     $('ctxMenu'),
+  ctxPin:      $('ctxPin'),
+  ctxPinLabel: $('ctxPinLabel'),
+  ctxRename:   $('ctxRename'),
+  ctxDelete:   $('ctxDelete'),
 };
 
 // ── Toast ──────────────────────────────────────
@@ -239,9 +283,9 @@ function renderMarkdown(text) {
     .replace(/(<\/pre>|<\/h[1-3]>|<\/ul>|<\/blockquote>)<\/p>/g,'$1');
 }
 
-// ── Layout helpers ─────────────────────────────
+// ── Helpers ────────────────────────────────────
 function escHtml(s) {
-  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
 function formatTime(ts) {
@@ -250,10 +294,152 @@ function formatTime(ts) {
   return d.toLocaleDateString([],{month:'short',day:'numeric'});
 }
 
-function getActiveChat() {
-  return state.activeChatId ? state.chats[state.activeChatId] : null;
+function getActiveChat() { return state.activeChatId ? state.chats[state.activeChatId] : null; }
+
+function scrollToBottom() { els.chatArea.scrollTop = els.chatArea.scrollHeight; }
+
+function resizeInput() {
+  const el = els.chatInput;
+  el.style.height = 'auto';
+  el.style.height = Math.min(Math.max(el.scrollHeight, 46), 73) + 'px';
 }
 
+// ── View switching ─────────────────────────────
+function switchView(view) {
+  currentView = view;
+  if (view === 'agents') {
+    els.chatArea.style.display   = 'none';
+    els.inputArea.style.display  = 'none';
+    els.agentsView.style.display = 'flex';
+    els.chatTopbarActions.style.display   = 'none';
+    els.agentsTopbarActions.style.display = 'flex';
+    renderAgentsView();
+  } else {
+    els.agentsView.style.display = 'none';
+    els.chatTopbarActions.style.display   = 'flex';
+    els.agentsTopbarActions.style.display = 'none';
+    els.chatArea.style.display  = '';
+    els.inputArea.style.display = '';
+    updateLayout();
+  }
+}
+
+// ── Agents view rendering ──────────────────────
+function renderAgentsView() {
+  const agents = loadAgents();
+  if (selectedAgentId) {
+    els.agentsListScreen.style.display = 'none';
+    els.agentDetail.style.display      = 'flex';
+    renderAgentDetail(selectedAgentId);
+  } else {
+    els.agentsListScreen.style.display = 'flex';
+    els.agentDetail.style.display      = 'none';
+    renderAgentsList(agents);
+  }
+}
+
+function renderAgentsList(agents) {
+  if (!agents.length) {
+    els.agentsEmpty.style.display = 'flex';
+    els.agentsGrid.innerHTML = '';
+  } else {
+    els.agentsEmpty.style.display = 'none';
+    els.agentsGrid.innerHTML = agents.map(a => `
+      <div class="agent-card" data-agent-id="${escHtml(a.id)}">
+        <div class="agent-card-avatar">${escHtml((a.title[0] || 'A').toUpperCase())}</div>
+        <div>
+          <div class="agent-card-title">${escHtml(a.title)}</div>
+          <div class="agent-card-username">@${escHtml(a.username)}</div>
+        </div>
+        ${a.description ? `<div class="agent-card-desc">${escHtml(a.description)}</div>` : ''}
+        <span class="agent-card-type">${escHtml(a.type)}</span>
+      </div>
+    `).join('');
+  }
+}
+
+function renderAgentDetail(agentId) {
+  const agents = loadAgents();
+  const agent = agents.find(a => a.id === agentId);
+  if (!agent) { selectedAgentId = null; renderAgentsView(); return; }
+
+  els.agentDetailNav.innerHTML = `
+    <button class="agent-detail-back" id="agentDetailBack">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 18 9 12 15 6"/></svg>
+      Back
+    </button>
+    <div class="agent-detail-agent-name">${escHtml(agent.title)}</div>
+    ${AGENT_NAV.map(item => `
+      <button class="agent-detail-nav-item ${item.id === selectedAgentSection ? 'active' : ''}" data-section="${item.id}">
+        ${item.label}
+      </button>
+    `).join('')}
+  `;
+
+  renderAgentSection(agent, selectedAgentSection);
+
+  document.getElementById('agentDetailBack')?.addEventListener('click', () => {
+    selectedAgentId = null;
+    renderAgentsView();
+  });
+
+  els.agentDetailNav.querySelectorAll('[data-section]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      selectedAgentSection = btn.dataset.section;
+      renderAgentDetail(agentId);
+    });
+  });
+}
+
+function renderAgentSection(agent, section) {
+  if (section === 'general') {
+    els.agentDetailContent.innerHTML = `
+      <h2 class="agent-detail-section-title">General</h2>
+      <div class="agent-detail-field"><label>Title</label><p>${escHtml(agent.title)}</p></div>
+      <div class="agent-detail-field"><label>Username</label><p>@${escHtml(agent.username)}</p></div>
+      ${agent.description ? `<div class="agent-detail-field"><label>Description</label><p>${escHtml(agent.description)}</p></div>` : ''}
+      <div class="agent-detail-field"><label>Type</label><p>${escHtml(agent.type)}</p></div>
+      <div class="agent-detail-field"><label>Created</label><p>${new Date(agent.createdAt).toLocaleDateString([],{year:'numeric',month:'long',day:'numeric'})}</p></div>
+    `;
+  } else {
+    const label = AGENT_NAV.find(n => n.id === section)?.label || section;
+    els.agentDetailContent.innerHTML = `
+      <h2 class="agent-detail-section-title">${label}</h2>
+      <div class="agent-detail-coming">Coming soon</div>
+    `;
+  }
+}
+
+// ── Add agent modal ────────────────────────────
+function openAddAgentModal() {
+  els.newAgentTitle.value       = '';
+  els.newAgentUsername.value    = '';
+  els.newAgentDescription.value = '';
+  els.newAgentApi.value         = '';
+  els.newAgentType.value        = 'Assistant';
+  els.addAgentModal.classList.add('open');
+  els.newAgentTitle.focus();
+}
+
+function closeAddAgentModal() { els.addAgentModal.classList.remove('open'); }
+
+function handleCreateAgent() {
+  const title    = els.newAgentTitle.value.trim();
+  const username = els.newAgentUsername.value.trim();
+  if (!title)    { toast('Title is required', 'error'); return; }
+  if (!username) { toast('Username is required', 'error'); return; }
+  createNewAgent({
+    title, username,
+    description: els.newAgentDescription.value.trim(),
+    api:         els.newAgentApi.value.trim(),
+    type:        els.newAgentType.value,
+  });
+  closeAddAgentModal();
+  renderAgentsView();
+  toast('Agent created!', 'success');
+}
+
+// ── Layout helpers ─────────────────────────────
 function updateLayout() {
   const chat = getActiveChat();
   const hasMessages = !!(chat && chat.messages.length > 0);
@@ -267,32 +453,22 @@ function updateLayout() {
     els.messages.style.display = 'none';
     if (els.inputArea.parentNode !== els.welcomeInputSlot) els.welcomeInputSlot.appendChild(els.inputArea);
   }
-}
-
-function scrollToBottom() { els.chatArea.scrollTop = els.chatArea.scrollHeight; }
-
-function resizeInput() {
-  const el = els.chatInput;
-  el.style.height = 'auto';
-  // 3 lines max: ~21px per line × 3 + top/bottom padding ≈ 73px
-  el.style.height = Math.min(el.scrollHeight, 73) + 'px';
+  resizeInput();
 }
 
 // ── History ────────────────────────────────────
 function renderHistory() {
   const pinned = getPinnedIds();
   const pinnedSet = new Set(pinned);
-
   const all = Object.keys(state.chats);
   if (!all.length) { els.historyList.innerHTML = '<div class="history-empty">No chats yet.</div>'; return; }
 
-  // Pinned first, then rest sorted by createdAt desc
   const sorted = [
     ...pinned.filter(id => state.chats[id]),
     ...all.filter(id => !pinnedSet.has(id)).sort((a,b) => state.chats[b].createdAt - state.chats[a].createdAt),
   ];
 
-  const pinSvg = `<svg class="pin-icon" width="11" height="11" viewBox="0 0 24 24" fill="currentColor" stroke="none"><path d="M16 4v6l2 2-6 6-2-6H4l2-2 6-2V4h4z"/></svg>`;
+  const pinSvg = `<svg class="pin-icon" width="11" height="11" viewBox="0 0 24 24" fill="currentColor"><path d="M16 4v6l2 2-6 6-2-6H4l2-2 6-2V4h4z"/></svg>`;
 
   els.historyList.innerHTML = sorted.map(id => {
     const c = state.chats[id];
@@ -318,10 +494,7 @@ function showCtxMenu(e, chatId) {
   els.ctxMenu.classList.add('open');
 }
 
-function hideCtxMenu() {
-  els.ctxMenu.classList.remove('open');
-  ctxTargetId = null;
-}
+function hideCtxMenu() { els.ctxMenu.classList.remove('open'); ctxTargetId = null; }
 
 // ── Rename ─────────────────────────────────────
 function startRename(chatId) {
@@ -334,7 +507,6 @@ function startRename(chatId) {
   const input = document.createElement('input');
   input.className = 'rename-input';
   input.value = chat.title;
-
   textSpan.replaceWith(input);
   input.focus();
   input.select();
@@ -355,10 +527,10 @@ function startRename(chatId) {
 
 // ── Messages ───────────────────────────────────
 function buildMessageHTML(msg) {
-  const isUser = msg.role === 'user';
+  const isUser   = msg.role === 'user';
   const agentKey = (msg.agent && agentPersonas[msg.agent]) ? msg.agent : 'chatbot';
-  const label  = isUser ? 'You' : agentPersonas[agentKey].name;
-  const content= isUser ? `<p>${escHtml(msg.content)}</p>` : renderMarkdown(msg.content);
+  const label    = isUser ? 'You' : agentPersonas[agentKey].name;
+  const content  = isUser ? `<p>${escHtml(msg.content)}</p>` : renderMarkdown(msg.content);
   return `<div class="message ${msg.role}" data-id="${msg.id}">
     <div class="msg-avatar">${isUser?'U':'Z'}</div>
     <div class="msg-body">
@@ -416,7 +588,6 @@ async function switchChat(id) {
     els.messages.innerHTML = '<div class="msgs-loading"><div class="thinking"><span></span><span></span><span></span></div></div>';
     els.messages.style.display = 'flex';
     if (els.inputArea.parentNode !== els.main) els.main.appendChild(els.inputArea);
-
     try { await dbLoadMessages(id); } catch (err) { toast('Failed to load messages: ' + err.message, 'error'); }
   }
 
@@ -426,11 +597,7 @@ async function switchChat(id) {
 
 async function deleteChat(id) {
   try { await dbDeleteChat(id); } catch (err) { toast('Delete failed: ' + err.message, 'error'); return; }
-
-  // Remove from pinned if present
-  const pinned = getPinnedIds().filter(p => p !== id);
-  setPinnedIds(pinned);
-
+  setPinnedIds(getPinnedIds().filter(p => p !== id));
   delete state.chats[id];
   if (state.activeChatId === id) {
     const ids = Object.keys(state.chats);
@@ -444,7 +611,7 @@ async function deleteChat(id) {
   updateLayout();
 }
 
-// ── Loading states ─────────────────────────────
+// ── Loading state ──────────────────────────────
 function setLoading(loading) {
   els.sendBtn.disabled = loading || !els.chatInput.value.trim();
   els.sendBtn.classList.toggle('loading', loading);
@@ -460,16 +627,14 @@ async function sendMessage() {
   if (!state.apiKey) { openSettings(); toast('Add your Anthropic API key first.', 'error'); return; }
 
   if (!state.activeChatId) {
-    try {
-      state.activeChatId = await dbCreateChat(state.agent);
-      renderHistory();
-    } catch (err) { toast('Could not create chat: ' + err.message, 'error'); return; }
+    try { state.activeChatId = await dbCreateChat(state.agent); renderHistory(); }
+    catch (err) { toast('Could not create chat: ' + err.message, 'error'); return; }
   }
 
   const chat = getActiveChat();
-
   els.chatInput.value = '';
   els.chatInput.style.height = 'auto';
+  resizeInput();
 
   state.isLoading = true;
   setLoading(true);
@@ -501,10 +666,8 @@ async function sendMessage() {
 
   } catch (err) {
     removeThinking();
-    const errMsg = {
-      id: `err_${Date.now()}`, role: 'assistant', agent: state.agent,
-      content: `**Error:** ${err.message || 'Something went wrong. Check your API key.'}`,
-    };
+    const errMsg = { id: `err_${Date.now()}`, role: 'assistant', agent: state.agent,
+      content: `**Error:** ${err.message || 'Something went wrong. Check your API key.'}` };
     const chat2 = getActiveChat();
     if (chat2) chat2.messages.push(errMsg);
     appendMessage(errMsg);
@@ -518,7 +681,7 @@ async function sendMessage() {
 // ── Anthropic API ──────────────────────────────
 async function callClaude(messages) {
   const agentKey = agentPersonas[state.agent] ? state.agent : 'chatbot';
-  const persona = agentPersonas[agentKey];
+  const persona  = agentPersonas[agentKey];
   const systemText = state.systemPrompt + (persona.systemSuffix || '');
   const apiMessages = messages
     .filter(m => !m.id?.startsWith('err_'))
@@ -540,7 +703,6 @@ async function callClaude(messages) {
     try { const b = await res.json(); msg = b?.error?.message || msg; } catch (_) {}
     throw new Error(msg);
   }
-
   const data = await res.json();
   const content = data?.content?.[0]?.text;
   if (!content) throw new Error('Empty response from API');
@@ -554,7 +716,6 @@ function openSettings() {
   els.systemPrompt.value = state.systemPrompt;
   els.settingsModal.classList.add('open');
 }
-
 function closeSettingsModal() { els.settingsModal.classList.remove('open'); }
 
 function saveSettingsAction() {
@@ -570,7 +731,7 @@ function saveSettingsAction() {
 
 function updateConnectionBadge() {
   const connected = !!state.apiKey;
-  els.connDot.className    = 'conn-dot' + (connected ? ' active' : '');
+  els.connDot.className     = 'conn-dot' + (connected ? ' active' : '');
   els.connLabel.textContent = connected
     ? `Connected: ${MODEL_LABELS[state.model] || state.model}`
     : 'Not connected';
@@ -594,20 +755,13 @@ async function signInWithGoogle() {
 async function signOut() { await db.auth.signOut(); }
 
 function updateUserDisplay(user) {
-  const meta = user.user_metadata || {};
-  const name  = meta.full_name || meta.name || user.email?.split('@')[0] || 'User';
-  const email = user.email || '';
-  const avatar= meta.avatar_url || meta.picture || '';
-
+  const meta   = user.user_metadata || {};
+  const name   = meta.full_name || meta.name || user.email?.split('@')[0] || 'User';
+  const avatar = meta.avatar_url || meta.picture || '';
   els.userName.textContent         = name;
-  els.userEmailDisplay.textContent = email;
-
-  if (avatar) {
-    els.userAvatarImg.src = avatar;
-    els.userAvatarImg.style.display = 'block';
-  } else {
-    els.userAvatarImg.style.display = 'none';
-  }
+  els.userEmailDisplay.textContent = user.email || '';
+  if (avatar) { els.userAvatarImg.src = avatar; els.userAvatarImg.style.display = 'block'; }
+  else { els.userAvatarImg.style.display = 'none'; }
 }
 
 async function onLogin(user) {
@@ -617,18 +771,15 @@ async function onLogin(user) {
 
   try {
     try { await dbLoadChats(); } catch (err) { toast('Failed to load chats: ' + err.message, 'error'); }
-
     const ids = Object.keys(state.chats);
     if (ids.length) {
       state.activeChatId = ids[0];
       try { await dbLoadMessages(state.activeChatId); } catch (_) {}
     }
   } finally {
-    // Always show the app — even if DB calls fail, never leave loading screen stuck
     els.loadingScreen.style.display = 'none';
     els.loginScreen.style.display   = 'none';
     els.app.style.display           = 'flex';
-
     els.pillModelSelect.value = state.model;
     els.apiKeyInput.value     = state.apiKey;
     els.modelSelect.value     = state.model;
@@ -641,9 +792,8 @@ async function onLogin(user) {
 }
 
 function onSignOut() {
-  state.user = null;
-  state.chats = {};
-  state.activeChatId = null;
+  state.user = null; state.chats = {}; state.activeChatId = null;
+  currentView = 'chat'; selectedAgentId = null;
   els.app.style.display           = 'none';
   els.loadingScreen.style.display = 'none';
   els.loginScreen.style.display   = 'flex';
@@ -666,64 +816,64 @@ function initEvents() {
 
   els.newChatBtn.addEventListener('click', () => {
     state.activeChatId = null;
-    renderHistory();
-    renderMessages();
-    updateLayout();
+    if (currentView !== 'chat') {
+      document.querySelectorAll('.agent-tab').forEach(t => t.classList.remove('active'));
+      document.querySelector('.agent-tab[data-agent="chatbot"]')?.classList.add('active');
+      switchView('chat');
+    } else {
+      renderHistory();
+      renderMessages();
+      updateLayout();
+    }
   });
 
   els.projectsBtn.addEventListener('click', () => toast('Projects — coming soon', ''));
   els.moreBtn.addEventListener('click',     () => toast('More — coming soon', ''));
 
+  // Agent tabs → switch views
+  document.querySelectorAll('.agent-tab').forEach(tab => {
+    tab.addEventListener('click', () => {
+      const type = tab.dataset.agent;
+      if (type === 'automation') { toast('Automation — coming soon', ''); return; }
+      document.querySelectorAll('.agent-tab').forEach(t => t.classList.remove('active'));
+      tab.classList.add('active');
+      if (type === 'agent') {
+        switchView('agents');
+      } else {
+        state.agent = type;
+        if (currentView !== 'chat') {
+          selectedAgentId = null;
+          switchView('chat');
+        }
+      }
+    });
+  });
+
   // History clicks
   els.historyList.addEventListener('click', e => {
     if (e.target.closest('.rename-input')) return;
     const item = e.target.closest('[data-id]');
-    if (item) switchChat(item.dataset.id);
+    if (item) {
+      if (currentView !== 'chat') {
+        document.querySelectorAll('.agent-tab').forEach(t => t.classList.remove('active'));
+        document.querySelector('.agent-tab[data-agent="chatbot"]')?.classList.add('active');
+        switchView('chat');
+      }
+      switchChat(item.dataset.id);
+    }
   });
 
   // Right-click context menu on history items
   els.historyList.addEventListener('contextmenu', e => {
     const item = e.target.closest('[data-id]');
-    if (!item) return;
-    showCtxMenu(e, item.dataset.id);
+    if (item) showCtxMenu(e, item.dataset.id);
   });
 
-  // Context menu actions
-  els.ctxPin.addEventListener('click', () => {
-    if (!ctxTargetId) return;
-    togglePin(ctxTargetId);
-    renderHistory();
-    hideCtxMenu();
-  });
-
-  els.ctxRename.addEventListener('click', () => {
-    const id = ctxTargetId;
-    hideCtxMenu();
-    if (id) startRename(id);
-  });
-
-  els.ctxDelete.addEventListener('click', () => {
-    const id = ctxTargetId;
-    hideCtxMenu();
-    if (id) deleteChat(id);
-  });
-
-  // Hide context menu on outside click or Escape
-  document.addEventListener('click', e => {
-    if (!els.ctxMenu.contains(e.target)) hideCtxMenu();
-  });
-  document.addEventListener('keydown', e => {
-    if (e.key === 'Escape') hideCtxMenu();
-  });
-
-  // Agent tabs
-  document.querySelectorAll('.agent-tab').forEach(tab => {
-    tab.addEventListener('click', () => {
-      document.querySelectorAll('.agent-tab').forEach(t => t.classList.remove('active'));
-      tab.classList.add('active');
-      state.agent = tab.dataset.agent;
-    });
-  });
+  els.ctxPin.addEventListener('click',    () => { if (ctxTargetId) { togglePin(ctxTargetId); renderHistory(); } hideCtxMenu(); });
+  els.ctxRename.addEventListener('click', () => { const id = ctxTargetId; hideCtxMenu(); if (id) startRename(id); });
+  els.ctxDelete.addEventListener('click', () => { const id = ctxTargetId; hideCtxMenu(); if (id) deleteChat(id); });
+  document.addEventListener('click',   e => { if (!els.ctxMenu.contains(e.target)) hideCtxMenu(); });
+  document.addEventListener('keydown', e => { if (e.key === 'Escape') { hideCtxMenu(); closeAddAgentModal(); closeSettingsModal(); } });
 
   // Input
   els.chatInput.addEventListener('input', () => {
@@ -741,11 +891,8 @@ function initEvents() {
     if (!chat || !chat.messages.length) return;
     try {
       await dbClearMessages(state.activeChatId);
-      chat.messages = [];
-      chat.messagesLoaded = true;
-      renderMessages();
-      updateLayout();
-      toast('Chat cleared');
+      chat.messages = []; chat.messagesLoaded = true;
+      renderMessages(); updateLayout(); toast('Chat cleared');
     } catch (err) { toast('Failed to clear: ' + err.message, 'error'); }
   });
 
@@ -766,6 +913,18 @@ function initEvents() {
       toast('Copied!', 'success');
       setTimeout(() => btn.classList.remove('copied'), 1500);
     });
+  });
+
+  // Agents
+  els.addAgentBtn.addEventListener('click', openAddAgentModal);
+  els.closeAddAgent.addEventListener('click', closeAddAgentModal);
+  els.cancelAddAgent.addEventListener('click', closeAddAgentModal);
+  els.addAgentModal.addEventListener('click', e => { if (e.target === els.addAgentModal) closeAddAgentModal(); });
+  els.createAgentBtn.addEventListener('click', handleCreateAgent);
+
+  els.agentsGrid.addEventListener('click', e => {
+    const card = e.target.closest('[data-agent-id]');
+    if (card) { selectedAgentId = card.dataset.agentId; selectedAgentSection = 'general'; renderAgentsView(); }
   });
 
   // Settings modal
@@ -798,8 +957,6 @@ async function tryLogin(user) {
 async function init() {
   initEvents();
 
-  // onAuthStateChange covers OAuth redirect (SIGNED_IN) and explicit sign-out.
-  // We do NOT rely on INITIAL_SESSION here — getSession() below is the boot path.
   db.auth.onAuthStateChange((event, session) => {
     if (event === 'SIGNED_IN' && session?.user && !appInitialized) {
       appInitialized = true;
@@ -810,8 +967,6 @@ async function init() {
     }
   });
 
-  // getSession() can make a network call to refresh an expired token.
-  // Race it against a 5-second timeout so it can never hang the loading screen.
   let bootSession = null;
   try {
     bootSession = await Promise.race([

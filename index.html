@@ -163,7 +163,7 @@
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
         </button>
         <div class="topbar-spacer"></div>
-        <div class="topbar-actions">
+        <div class="topbar-actions" id="chatTopbarActions">
           <button class="icon-btn" id="clearChatBtn" title="Clear chat">
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>
           </button>
@@ -172,6 +172,12 @@
             <span class="conn-label" id="connLabel">Not connected</span>
             <button class="btn-change" id="topSettingsBtn">Change</button>
           </div>
+        </div>
+        <div class="topbar-actions" id="agentsTopbarActions" style="display:none">
+          <button class="btn-add-agent" id="addAgentBtn">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+            Add
+          </button>
         </div>
       </header>
 
@@ -183,12 +189,30 @@
         <div class="messages" id="messages"></div>
       </div>
 
+      <!-- Agents View -->
+      <div class="agents-view" id="agentsView" style="display:none">
+        <div class="agents-list-screen" id="agentsListScreen">
+          <div class="agents-empty" id="agentsEmpty">
+            <div class="agents-empty-icon">
+              <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="8" r="4"/><path d="M6 20v-2a6 6 0 0 1 12 0v2"/></svg>
+            </div>
+            <p class="agents-empty-title">No agents</p>
+            <p class="agents-empty-sub">Click <strong>Add</strong> to create your first agent</p>
+          </div>
+          <div class="agents-grid" id="agentsGrid"></div>
+        </div>
+        <div class="agent-detail" id="agentDetail" style="display:none">
+          <div class="agent-detail-nav" id="agentDetailNav"></div>
+          <div class="agent-detail-content" id="agentDetailContent"></div>
+        </div>
+      </div>
+
       <div class="input-area" id="inputArea">
         <div class="input-pill">
           <button class="pill-btn-left" title="Attach (coming soon)" disabled>
             <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
           </button>
-          <textarea class="chat-input" id="chatInput" placeholder="Write your prompt here..." rows="1"></textarea>
+          <textarea class="chat-input" id="chatInput" placeholder="Write your prompt here..." rows="3"></textarea>
           <div class="pill-model-wrap">
             <select class="pill-model-select" id="pillModelSelect">
               <option value="claude-sonnet-4-6">Sonnet 4.6</option>
@@ -221,6 +245,53 @@
       <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6"/></svg>
       Delete
     </button>
+  </div>
+
+  <!-- Add Agent Modal -->
+  <div class="modal-overlay" id="addAgentModal">
+    <div class="modal">
+      <div class="modal-header">
+        <div class="modal-title-row">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="8" r="4"/><path d="M6 20v-2a6 6 0 0 1 12 0v2"/></svg>
+          <h2>Create Agent</h2>
+        </div>
+        <button class="modal-close" id="closeAddAgent">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+        </button>
+      </div>
+      <div class="modal-body">
+        <div class="setting-group">
+          <label class="setting-label">Title</label>
+          <input type="text" class="setting-input" id="newAgentTitle" placeholder="My Agent" />
+        </div>
+        <div class="setting-group">
+          <label class="setting-label">Username</label>
+          <input type="text" class="setting-input" id="newAgentUsername" placeholder="myagent" />
+        </div>
+        <div class="setting-group">
+          <label class="setting-label">Description</label>
+          <textarea class="setting-input setting-textarea" id="newAgentDescription" placeholder="What does this agent do?"></textarea>
+        </div>
+        <div class="setting-group">
+          <label class="setting-label">API Key</label>
+          <input type="password" class="setting-input" id="newAgentApi" placeholder="sk-ant-..." />
+        </div>
+        <div class="setting-group">
+          <label class="setting-label">Type</label>
+          <select class="setting-input" id="newAgentType">
+            <option value="Assistant">Assistant</option>
+            <option value="Automation">Automation</option>
+            <option value="Analyst">Analyst</option>
+            <option value="Coder">Coder</option>
+            <option value="Researcher">Researcher</option>
+          </select>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn-secondary" id="cancelAddAgent">Cancel</button>
+        <button class="btn-primary" id="createAgentBtn">Create</button>
+      </div>
+    </div>
   </div>
 
   <script src="app.js"></script>
